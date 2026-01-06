@@ -8,6 +8,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -145,11 +148,26 @@ jobs:
           path: |
             hassos-provisioner-x86_64.iso
             hassos-provisioner-rpi.img.gz
+          retention-days: 1
 
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
         with:
-          files: |
-            hassos-provisioner-x86_64.iso
-            hassos-provisioner-rpi.img.gz
+          path: release_artifacts
+          pattern: hassos-provisioner-*
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release_artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
