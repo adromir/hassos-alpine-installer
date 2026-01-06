@@ -75,6 +75,10 @@ jobs:
           # Extract and Inject
           mkdir -p isofiles
           xorriso -osirrox on -indev alpine.iso -extract / isofiles
+          
+          # Fix permissions immediately after extraction (ISO files are read-only)
+          chmod -R +w isofiles
+          
           cp localhost.apkovl.tar.gz isofiles/
           
           # Modify Boot Configs
