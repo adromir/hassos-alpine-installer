@@ -1,0 +1,16 @@
+#!/bin/sh
+# ---
+# File: hassos.start
+# Description: Autostart script located in /etc/local.d/
+# This script ensures the installer runs automatically on boot.
+# ---
+
+if [ -f /root/installer.sh ]; then
+	chmod +x /root/installer.sh
+	
+	# Start networking to ensure we can scan for WiFi
+	openrc-run networking start >/dev/null 2>&1
+	
+	# Run the installer on the main TTY
+	/root/installer.sh < /dev/tty1 > /dev/tty1 2>&1
+fi
