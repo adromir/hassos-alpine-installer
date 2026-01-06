@@ -1,0 +1,149 @@
+name: Build HassOS Provisioner Media
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Create Overlay
+        uses: docker://alpine:3.23.2
+        with:
+          entrypoint: /bin/sh
+          args: -c "
+            apk update && 
+            apk add tar bash &&
+            mkdir -p overlay/pkg/core &&
+            mkdir -p overlay/pkg/drivers &&
+            
+            echo 'Fetching Core Packages for ${{ matrix.arch }}...' &&
+            apk fetch --arch ${{ matrix.arch }} -R -o overlay/pkg/core \
+              bash newt curl xz lsblk wireless-tools wpa_supplicant parted util-linux &&
+            
+            echo 'Fetching Driver Packages for ${{ matrix.arch }}...' &&
+            if [ '${{ matrix.arch }}' = 'aarch64' ]; then
+              apk fetch --arch ${{ matrix.arch }} -R -o overlay/pkg/drivers \
+                linux-firmware-brcm \
+                linux-firmware-cypress \
+                linux-firmware-ath10k \
+                linux-firmware-ath11k \
+                linux-firmware-none
+            else
+              apk fetch --arch ${{ matrix.arch }} -R -o overlay/pkg/drivers \
+                linux-firmware-iwlwifi \
+                linux-firmware-rtw88 \
+                linux-firmware-rtw89 \
+                linux-firmware-ath10k \
+                linux-firmware-ath11k \
+                linux-firmware-bnx2 \
+                linux-firmware-mrvl \
+                linux-firmware-none
+            fi &&
+            
+            cd overlay && 
+            tar -czvf ../localhost.apkovl.tar.gz ."
+
+      - name: Prepare Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorriso syslinux-utils p7zip-full wget dosfstools mtools libarchive-tools
+      
+      # --- x86_64 ISO BUILD ---
+      - name: Build x86_64 ISO
+        if: matrix.arch == 'x86_64'
+        run: |
+          # Download Alpine Standard ISO version 3.23.2
+          ISO_NAME="alpine-standard-3.23.2-x86_64.iso"
+          URL="https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/x86_64/$ISO_NAME"
+          wget "$URL" -O alpine.iso
+          
+          # Extract and Inject
+          mkdir -p isofiles
+          xorriso -osirrox on -indev alpine.iso -extract / isofiles
+          cp localhost.apkovl.tar.gz isofiles/
+          
+          # Modify Boot Configs
+          sed -i 's/modules=loop,squashfs,sd-mod,usb-storage/modules=loop,squashfs,sd-mod,usb-storage apkovl=localhost.apkovl.tar.gz/g' isofiles/boot/grub/grub.cfg
+          sed -i '/^\s*APPEND / s/$/ apkovl=localhost.apkovl.tar.gz/' isofiles/boot/syslinux/syslinux.cfg
+          
+          chmod -R +w isofiles
+          
+          # Repack Hybrid ISO
+          xorriso -as mkisofs \
+            -r -J -joliet-long \
+            -V "HASSOS_PROV" \
+            -b boot/syslinux/isolinux.bin \
+            -c boot/syslinux/boot.cat \
+            -no-emul-boot -boot-load-size 4 -boot-info-table \
+            -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
+            -o hassos-provisioner-x86_64.iso isofiles
+
+      # --- aarch64 RPi IMAGE BUILD ---
+      - name: Build RPi Image
+        if: matrix.arch == 'aarch64'
+        run: |
+          # Download Alpine RPi Tarball version 3.23.2
+          URL="https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/aarch64/alpine-rpi-3.23.2-aarch64.tar.gz"
+          wget "$URL" -O alpine-rpi.tar.gz
+          
+          # Create blank 512MB image
+          IMG_NAME="hassos-provisioner-rpi.img"
+          dd if=/dev/zero of=$IMG_NAME bs=1M count=512
+          
+          # Partitioning (Using parted)
+          parted $IMG_NAME mklabel msdos
+          parted $IMG_NAME mkpart primary fat32 2048s 100%
+          parted $IMG_NAME set 1 boot on
+          
+          # Format
+          LOOP_DEV=$(sudo losetup -P -f --show $IMG_NAME)
+          sudo mkfs.vfat -n "HASSOS_RPI" "${LOOP_DEV}p1"
+          
+          # Mount
+          sudo mkdir -p /mnt/rpi
+          sudo mount "${LOOP_DEV}p1" /mnt/rpi
+          
+          # Extract Alpine RPi
+          sudo tar -xzf alpine-rpi.tar.gz -C /mnt/rpi
+          
+          # Copy Overlay
+          sudo cp localhost.apkovl.tar.gz /mnt/rpi/
+          
+          # Modify cmdline.txt
+          sudo sed -i 's/$/ apkovl=localhost.apkovl.tar.gz/' /mnt/rpi/cmdline.txt
+          
+          # Cleanup
+          sudo umount /mnt/rpi
+          sudo losetup -d $LOOP_DEV
+          
+          # Compress
+          gzip -k $IMG_NAME
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: hassos-provisioner-${{ matrix.arch }}
+          path: |
+            hassos-provisioner-x86_64.iso
+            hassos-provisioner-rpi.img.gz
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            hassos-provisioner-x86_64.iso
+            hassos-provisioner-rpi.img.gz
