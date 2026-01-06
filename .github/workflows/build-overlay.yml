@@ -17,7 +17,7 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Create Overlay
         uses: docker://alpine:3.23.2
@@ -133,7 +133,7 @@ jobs:
           gzip -k $IMG_NAME
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hassos-provisioner-${{ matrix.arch }}
           path: |
