@@ -12,6 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
     
@@ -24,6 +25,7 @@ jobs:
         with:
           entrypoint: /bin/sh
           args: -c "
+            set -e &&
             apk update && 
             apk add tar bash &&
             mkdir -p overlay/pkg/core &&
@@ -40,7 +42,7 @@ jobs:
                 linux-firmware-cypress \
                 linux-firmware-ath10k \
                 linux-firmware-ath11k \
-                linux-firmware-none
+                linux-firmware-none;
             else
               apk fetch --arch ${{ matrix.arch }} -R -o overlay/pkg/drivers \
                 linux-firmware-iwlwifi \
@@ -50,7 +52,7 @@ jobs:
                 linux-firmware-ath11k \
                 linux-firmware-bnx2 \
                 linux-firmware-mrvl \
-                linux-firmware-none
+                linux-firmware-none;
             fi &&
             
             cd overlay && 
